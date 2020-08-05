@@ -270,7 +270,7 @@ class Head(nn.Module):
     def __init__(
         self,
         num_input,
-        num_pred,
+        num_pred,  # regression需要多少个x y z w l h theta
         num_cls,
         use_dir=False,
         num_dir=0,
@@ -288,19 +288,20 @@ class Head(nn.Module):
         super(Head, self).__init__(**kwargs)
         self.use_dir = use_dir
 
-        self.pred_heads = num_pred 
-
+        self.pred_heads = num_pred #分支个数
+        
         for head in self.pred_heads:
             classes, num_conv = self.pred_heads[head]
 
             fc = Sequential()
+            # 连续3*3卷积 64channels
             for i in range(num_conv-1):
                 fc.add(nn.Conv2d(num_input, head_conv,
                     kernel_size=3, stride=1, 
                     padding=3 // 2, bias=True))
                 fc.add(nn.BatchNorm2d(head_conv))
                 fc.add(nn.ReLU())
-
+            # 
             fc.add(nn.Conv2d(64, num_classes * 2 *classes,
                     kernel_size=3, stride=1, 
                     padding=3 // 2, bias=True))    
@@ -310,7 +311,8 @@ class Head(nn.Module):
                     kaiming_init(m)
 
             self.__setattr__(head, fc)    
-
+        
+        # cls 两层卷积
         self.conv_cls = Sequential(
             nn.Conv2d(num_input, head_conv,
             kernel_size=3, padding=1, bias=True),
@@ -320,7 +322,8 @@ class Head(nn.Module):
                 kernel_size=3, stride=1, 
                 padding=1, bias=True)
         )
-
+        
+        # 这个要注意一下了！！
         # Focal loss paper points out that it is important to initialize the bias 
         self.conv_cls[-1].bias.data.fill_(init_bias)
 
@@ -330,20 +333,23 @@ class Head(nn.Module):
     def forward(self, x):
         ret_list = []
         
+        # 同一个feature map上面出同group下多个cls
         cls_preds = self.conv_cls(x).permute(0, 2, 3, 1).contiguous()
 
         ret_dict = dict()
+        
+        # 
         for head in self.pred_heads:
             ret_dict[head] = self.__getattr__(head)(x)
-
+        
+        # 把多个reg头concate在一起
         if 'vel' in ret_dict:
             box_preds = torch.cat((ret_dict['reg'], ret_dict['height'], ret_dict['dim'],
                                                     ret_dict['vel'], ret_dict['rot']), dim=1).permute(0, 2, 3, 1).contiguous()
         else:
             box_preds = torch.cat((ret_dict['reg'], ret_dict['height'], ret_dict['dim'],
                                                     ret_dict['rot']), dim=1).permute(0, 2, 3, 1).contiguous()
-                            
-
+        
         ret_dict = {"box_preds": box_preds, "cls_preds": cls_preds}
         if self.use_dir:
             dir_preds = self.conv_dir(x).permute(0, 2, 3, 1).contiguous()
@@ -1067,6 +1073,7 @@ class MultiGroupHead(nn.Module):
         return predictions_dicts
 
 
+# sephead只考虑分类或者中心点热图
 class SepHead(nn.Module):
     def __init__(
         self,
@@ -1082,11 +1089,17 @@ class SepHead(nn.Module):
     ):
         super(SepHead, self).__init__(**kwargs)
 
-        self.heads = heads 
+        self.heads = heads
+        # heads是一个字典吗？
+        # head就是拿出来的key，比如“hm_head”
+        # 字典的内容就是cls和num_conv
         for head in self.heads:
+            
             classes, num_conv = self.heads[head]
 
             fc = Sequential()
+            
+            # q前面多层1*1卷积64层，模仿fc
             for i in range(num_conv-1):
                 fc.add(nn.Conv2d(in_channels, head_conv,
                     kernel_size=final_kernel, stride=1, 
@@ -1094,11 +1107,13 @@ class SepHead(nn.Module):
                 if bn:
                     fc.add(nn.BatchNorm2d(head_conv))
                 fc.add(nn.ReLU())
-
+            # 最后一层卷出group内class
+            # cls表示两种：1.分类 2.每个cls的重点feature map
             fc.add(nn.Conv2d(head_conv, classes,
                     kernel_size=final_kernel, stride=1, 
                     padding=final_kernel // 2, bias=True))    
-
+            # 如果是hm head，loss是focal loss所以bias需要良好的初始化
+            # 如果不是hm head，那就是正常的分类需要正常初始化。
             if 'hm' in head:
                 fc[-1].bias.data.fill_(init_bias)
             else:
