@@ -571,14 +571,16 @@ class AssignLabel(object):
         assigner_cfg = kwargs["cfg"]
         self.out_size_factor = assigner_cfg.out_size_factor
         self.tasks = assigner_cfg.target_assigner.tasks
-        self.dense_reg = assigner_cfg.dense_reg
-        self.gaussian_overlap = assigner_cfg.gaussian_overlap
-        self._max_objs = assigner_cfg.max_objs
-        self._min_radius = assigner_cfg.min_radius
+        self.dense_reg = assigner_cfg.dense_reg                # 1
+        self.gaussian_overlap = assigner_cfg.gaussian_overlap  # 0.1
+        self._max_objs = assigner_cfg.max_objs                 # 最大500
+        self._min_radius = assigner_cfg.min_radius             # 2
         self.no_log = assigner_cfg.get("no_log", False)
 
     def __call__(self, res, info):
-        max_objs = self._max_objs * self.dense_reg
+        max_objs = self._max_objs * self.dense_reg  # dense reg要扩充那个维度？
+        
+        # 2d list dim1：task dim2：classes
         class_names_by_task = [t.class_names for t in self.tasks]
 
 
@@ -586,19 +588,23 @@ class AssignLabel(object):
 
         # Calculate output featuremap size
         grid_size = res["lidar"]["voxels"]["shape"]  # 448 x 512
-        pc_range = res["lidar"]["voxels"]["range"]
-        voxel_size = res["lidar"]["voxels"]["size"]
+        pc_range = res["lidar"]["voxels"]["range"]   # pcl范围实际大小
+        voxel_size = res["lidar"]["voxels"]["size"]  # voxel实际大小
 
         feature_map_size = grid_size[:2] // self.out_size_factor
         example = {}
 
         if res["mode"] == "train":
-            gt_dict = res["lidar"]["annotations"]
+            gt_dict = res["lidar"]["annotations"]   
 
             # reorganize the gt_dict by tasks
             task_masks = []
             flag = 0
-            for class_name in class_names_by_task:
+            
+            # 在class group里面的class_name是一个name list
+            # 每一个group内每一个class都要一个mask
+            # task_masks：[[m1,m2,m3,m4], [m1,m2,m3,m4]..]
+            for class_name in class_names_by_task: 
                 # print("classes: ", gt_dict["gt_classes"], "name", class_name)
                 task_masks.append(
                     [
@@ -606,7 +612,7 @@ class AssignLabel(object):
                             gt_dict["gt_classes"] == class_name.index(i) + 1 + flag
                         )
                         for i in class_name
-                    ]
+                    ] 
                 )
                 flag += len(class_name)
 
@@ -658,7 +664,8 @@ class AssignLabel(object):
                 mask = np.zeros((max_objs), dtype=np.uint8)
                 cat = np.zeros((max_objs), dtype=np.int64)
                 direction = np.zeros((max_objs), dtype=np.int64)
-
+                
+                # 统计gtbox个数
                 num_objs = min(gt_dict['gt_boxes'][idx].shape[0], max_objs)  
 
                 for k in range(num_objs):
