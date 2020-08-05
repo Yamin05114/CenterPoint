@@ -19,7 +19,7 @@ from det3d.torchie.trainer import load_checkpoint
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.modules.batchnorm import _BatchNorm
-from det3d.models.losses.centernet_loss import FocalLoss, SmoothRegLoss, RegLoss, RegClsLoss, FastFocalLoss
+from det3d.models.losses.centernet_loss import FocalLoss, SmoothRegLoss, RegLoss, RegClsLoss, FastFocalLoss # 这些loss都依赖中心点mask所以中心点都是被标记！
 from det3d.core.utils.center_utils import ddd_decode
 from det3d.models.utils import Sequential
 from .. import builder
@@ -1073,7 +1073,8 @@ class MultiGroupHead(nn.Module):
         return predictions_dicts
 
 
-# sephead只考虑分类或者中心点热图
+# sephead只考虑reg或者中心点热图
+# 这类的head每个cls只有一个值
 class SepHead(nn.Module):
     def __init__(
         self,
@@ -1093,6 +1094,7 @@ class SepHead(nn.Module):
         # heads是一个字典吗？
         # head就是拿出来的key，比如“hm_head”
         # 字典的内容就是cls和num_conv
+        # cls是多少个输出，但不一定是分类。
         for head in self.heads:
             
             classes, num_conv = self.heads[head]
@@ -1108,7 +1110,7 @@ class SepHead(nn.Module):
                     fc.add(nn.BatchNorm2d(head_conv))
                 fc.add(nn.ReLU())
             # 最后一层卷出group内class
-            # cls表示两种：1.分类 2.每个cls的重点feature map
+            # cls表示最终输出个数，两种：1.分类 2.每个cls的中点feature map
             fc.add(nn.Conv2d(head_conv, classes,
                     kernel_size=final_kernel, stride=1, 
                     padding=final_kernel // 2, bias=True))    
@@ -1176,7 +1178,7 @@ class DCNSepHead(nn.Module):
         )
         self.cls_head[-1].bias.data.fill_(init_bias)
 
-        # other regression target 
+        # other regression target: hm center size theta ....
         self.task_head = SepHead(in_channels, heads, head_conv=head_conv, bn=bn, final_kernel=final_kernel)
 
 
