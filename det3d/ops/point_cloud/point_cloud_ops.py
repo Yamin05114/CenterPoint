@@ -6,7 +6,7 @@ import numpy as np
 
 @numba.jit(nopython=True)
 def _points_to_voxel_reverse_kernel(
-    points,
+    points,  # x向前，y向左，z向上
     voxel_size,
     coors_range,
     num_points_per_voxel,
@@ -37,7 +37,7 @@ def _points_to_voxel_reverse_kernel(
             if c < 0 or c >= grid_size[j]:
                 failed = True
                 break
-            coor[ndim_minus_1 - j] = c
+            coor[ndim_minus_1 - j] = c # [z, y, x]
         if failed:
             continue
         voxelidx = coor_to_voxelidx[coor[0], coor[1], coor[2]]
